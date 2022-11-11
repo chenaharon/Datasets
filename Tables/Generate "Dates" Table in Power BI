@@ -1,0 +1,66 @@
+let
+    // The List.Dates function that returns a list of dates
+    Source = List.Dates,
+    // Invoke List.Dates function. Here you need to specify the dates you want the list to invoke.
+    // From Date: # Date (YYYY,MM,DD)
+    // To Date:  Duration.Days(DateTime.Date(DateTime.FixedLocalNow())-  #date(YYYY, MM, DD))+1  (It counts the number of days between today and the first date of the table and adds one day more to include today).
+    // To adapt this to your own calender table change the values for (YYYY; MM; DD)
+    // #duration (1,0,0,0) instructs List.Date to do one day increments in the list.
+    #"Invoke dates" = Source(#date(2016,01,01), Duration.Days(DateTime.Date(DateTime.FixedLocalNow())- #date(2016,01,01))+1, #duration(1, 0, 0, 0)),
+    // This step will convert the list to a table.
+    // To set the correct dates, edit the query parameters
+    #"List to table" = Table.FromList(#"Invoke dates", Splitter.SplitByNothing(), null, null, ExtraValues.Error),
+    //Rename column to Date
+    Date = Table.RenameColumns(#"List to table",{{"Column1", "Date"}}),
+    // Extract Day from Date column and add leading zeros “00”
+    #"Day Added" = Table.AddColumn(Date, "Day", each Text.PadStart(Number.ToText(Date.Day([Date])),2,"0")),
+    // Extract Day Name from Date column using american names.
+    // Navigate here for other Languages not included in the parameters: https://msdn.microsoft.com/en-us/goglobal/bb896001.aspx
+    #"Day Name Added" = Table.AddColumn(#"Day Added", "Day Name", each Date.ToText([Date],"dddd", "en_US")),
+    //Extract Month No from Date column    
+    #"Month No Added" = Table.AddColumn(#"Day Name Added", "Month No", each Date.Month([Date])),
+    // Extract Month Name from Date column.
+    // Navigate here for other Languages: https://msdn.microsoft.com/en-us/goglobal/bb896001.aspx
+    #"Month Name Added" = Table.AddColumn(#"Month No Added", "Month Name", each Date.ToText([Date],"MMMM","en_US")),
+    #"Short Month Name Added" = Table.AddColumn(#"Month Name Added", "Short Month Name", each Date.ToText([Date],"MMM","en_US")),
+
+    //Extract Quarter No from Date column
+    #"Quarter No Added" = Table.AddColumn(#"Short Month Name Added", "Quarter No", each Date.QuarterOfYear([Date])),
+    #"Added Custom2" = Table.AddColumn(#"Quarter No Added", "Quarter", each "Q" & Number.ToText([Quarter No])),
+    //Extract Week No from Date column
+    #"Week No Added" = Table.AddColumn(#"Added Custom2", "Week No", each Text.PadStart(Number.ToText(Date.WeekOfYear([Date])-1),2,"0")),
+    // Extract Year from Date column
+    #"Year Added" = Table.AddColumn(#"Week No Added", "Year", each Date.Year([Date])),
+    #"IntYear Added" = Table.AddColumn(#"Year Added", "IntYear", each Date.Year([Date])),
+    // Concatenate Year and Month Name
+    #"Year Month Added" = Table.AddColumn(#"IntYear Added", "Year-Month", each Number.ToText([Year])&"-"&[Short Month Name]),
+    // Concatenate Year and Quarter No with leading zeros on quarter Nos
+    #"Year Quarter Added" = Table.AddColumn(#"Year Month Added", "Year-Quarter", each Number.ToText([Year]) & "Q"& Number.ToText([Quarter No],"00")),
+    //Change field types to TEXT
+    #"Change type to text" = Table.TransformColumnTypes(#"Year Quarter Added",{{"Year", type text}, {"Date", type date}, {"Month No", type text}, {"Day", type text}, {"Day Name", type text}, {"Month Name", type text}, {"Quarter No", type text}, {"Year-Quarter", type text}, {"Year-Month", type text}}),
+    // Extract Day No from Date column as a number to sort the previously created Day column.
+    // 
+    #"Sort Day" = Table.AddColumn(#"Change type to text", "SortDay", each Date.Day([Date])),
+    // Extract DayName from Date column to sort the previously created Day Name column and use parameters to set if the Day starts on Monday or Sunday.
+    #"Sort DayName" = Table.AddColumn(#"Sort Day", "SortDayName", each Date.DayOfWeek([Date],1)),
+    // Extract the week number from date as a number to sort the previously created WeekNo column.
+    SortWeekNo = Table.AddColumn(#"Sort DayName", "SortWeekNo", each Date.WeekOfYear([Date])-1),
+    // Concatenate Year and Month Number to create a column to sort the previously created MonthYear column
+    #"Sort YearMonth" = Table.AddColumn(SortWeekNo, "SortYearMonth", each [Year]&Text.PadStart([Month No],2,"0")),
+    // Concatenate Year and Quarter Number to create a column to sort the previously created QuarterYear column
+    #"Sort YearQuarter" = Table.AddColumn(#"Sort YearMonth", "SortYearQuarter", each [Year]&Text.PadStart([Quarter No],2,"0")),
+    //Change the field type for the sort columns to numbers
+    #"Changed Type to NO" = Table.TransformColumnTypes(#"Sort YearQuarter",{{"SortYearMonth", Int64.Type}, {"SortYearQuarter", Int64.Type}, {"SortDayName", Int64.Type}, {"SortDay", Int64.Type}, {"Quarter No", Int64.Type}}),
+    #"Added Custom" = Table.AddColumn(#"Changed Type to NO", "Years Back", each Date.Year(DateTime.LocalNow()) - Number.FromText([Year]) +1),
+    #"Added Custom1" = Table.AddColumn(#"Added Custom", "date_key", each [Year]
+
+& (if Text.Length([Month No]) = 1 then "0" & [Month No] else [Month No])
+
+& (if Text.Length([Day]) = 1 then "0" & [Day] else [Day])),
+    #"Changed Type" = Table.TransformColumnTypes(#"Added Custom1",{{"IntYear", Int64.Type}, {"Month No", Int64.Type}}),
+    #"Added current year flag" = Table.AddColumn(#"Changed Type", "year_current", each if Date.IsInCurrentYear([Date]) then "Current Year" else [Year]),
+    #"Added current month flag" = Table.AddColumn(#"Added current year flag", "month_current", each if Date.IsInCurrentMonth([Date]) then "Current Month" else [Month Name]),
+    #"Added current date flag" = Table.AddColumn(#"Added current month flag", "date_current", each if Date.IsInCurrentDay([Date]) then "Today" else if Date.IsInPreviousNDays([Date],1) then "Yesterday" else Text.Combine({[Day],"/",Number.ToText([Month No],"D2"),"/",[Year]}))
+
+in
+    #"Added current date flag"
